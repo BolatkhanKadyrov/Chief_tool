@@ -1,0 +1,638 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Анализ технологических карт</title>
+<style>
+  /* ===== Стили ===== */
+  * { box-sizing: border-box; }
+  body { font-family: Arial, sans-serif; margin: 0; background: #f4f1ea; color: #222; }
+  header { background: #3b2f2f; color: #fff; padding: 12px 20px; }
+  header { display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 8px; }
+  header h1 { margin: 0; font-size: 20px; }
+  .header-buttons { display: flex; gap: 8px; }
+  /* окно выбора при импорте */
+  .modal { position: fixed; inset: 0; background: rgba(0,0,0,.5); display: flex; align-items: center; justify-content: center; z-index: 10; }
+  .modal-box { background: #fff; padding: 20px; border-radius: 8px; max-width: 420px; }
+  main { max-width: 1100px; margin: 0 auto; padding: 16px; display: grid; grid-template-columns: 340px 1fr; gap: 16px; }
+  /* на узком экране колонки встают друг под друга */
+  @media (max-width: 800px) { main { grid-template-columns: 1fr; } }
+  section { background: #fff; border-radius: 8px; padding: 14px; box-shadow: 0 1px 3px rgba(0,0,0,.15); }
+  section h2 { margin: 0 0 10px; font-size: 17px; }
+  label { display: block; font-size: 13px; margin-bottom: 4px; color: #555; }
+  input[type=text] { width: 100%; padding: 7px; border: 1px solid #bbb; border-radius: 4px; font-size: 14px; }
+  button { padding: 6px 12px; border: 0; border-radius: 4px; background: #c0562f; color: #fff; cursor: pointer; font-size: 14px; }
+  button.secondary { background: #888; }
+  button.small { padding: 3px 8px; font-size: 12px; }
+  .ing-row { display: flex; gap: 6px; margin-bottom: 6px; }
+  .buttons { margin-top: 10px; display: flex; gap: 8px; }
+  .dish { border-bottom: 1px solid #e5e5e5; padding: 10px 0; }
+  .dish:last-child { border-bottom: 0; }
+  .dish-head { display: flex; justify-content: space-between; align-items: center; gap: 8px; }
+  .dish-name { font-weight: bold; }
+  .bar { height: 10px; background: #e5e5e5; border-radius: 5px; margin: 6px 0; overflow: hidden; }
+  .bar div { height: 100%; background: #6a994e; }
+  .percent { font-size: 18px; font-weight: bold; }
+  .muted { color: #777; font-size: 13px; }
+  .empty { color: #777; padding: 20px 0; text-align: center; }
+  #ingredients-section { grid-column: 1 / -1; }
+  /* вкладки «Форма» / «Вставить текстом» */
+  .tabs { display: flex; gap: 6px; margin-bottom: 12px; }
+  .tabs button { background: #ddd; color: #333; }
+  .tabs button.active { background: #3b2f2f; color: #fff; }
+  textarea { width: 100%; min-height: 160px; padding: 7px; border: 1px solid #bbb; border-radius: 4px; font: 14px Arial, sans-serif; }
+  /* таблица ингредиентов */
+  table { width: 100%; border-collapse: collapse; font-size: 14px; }
+  th, td { text-align: left; padding: 6px 8px; border-bottom: 1px solid #e5e5e5; }
+  th.sortable { cursor: pointer; user-select: none; }
+  th.sortable:hover { background: #f4f1ea; }
+  .toolbar { display: flex; gap: 16px; align-items: center; margin-bottom: 8px; flex-wrap: wrap; }
+  .toolbar label { display: inline; margin: 0; font-size: 14px; color: #222; }
+</style>
+</head>
+<body>
+
+<header>
+  <h1>Анализ технологических карт</h1>
+  <div class="header-buttons">
+    <button type="button" class="secondary" id="export-json">Экспорт JSON</button>
+    <button type="button" class="secondary" id="import-json">Импорт JSON</button>
+    <input type="file" id="json-file" accept=".json,application/json" style="display:none">
+    <button type="button" class="secondary" id="export-xlsx">Экспорт Excel</button>
+    <button type="button" class="secondary" id="import-xlsx">Импорт Excel</button>
+    <input type="file" id="xlsx-file" accept=".xlsx,.xls" style="display:none">
+  </div>
+</header>
+
+<!-- Окно выбора при импорте: заменить / объединить / отмена -->
+<div id="modal" class="modal" style="display:none">
+  <div class="modal-box">
+    <p id="modal-text"></p>
+    <div class="buttons">
+      <button type="button" id="modal-replace">Заменить всё</button>
+      <button type="button" id="modal-merge">Объединить</button>
+      <button type="button" class="secondary" id="modal-cancel">Отмена</button>
+    </div>
+  </div>
+</div>
+
+<main>
+  <!-- Левая колонка: форма блюда -->
+  <section>
+    <h2 id="form-title">Новое блюдо</h2>
+    <label for="dish-name">Название блюда</label>
+    <input type="text" id="dish-name" placeholder="Например: Борщ">
+    <div class="tabs" style="margin-top:12px">
+      <button type="button" class="active" id="tab-form">Форма</button>
+      <button type="button" id="tab-text">Вставить текстом</button>
+    </div>
+    <!-- Способ 1: поля по одному ингредиенту -->
+    <div id="mode-form">
+      <div id="ing-list"></div>
+      <button type="button" class="secondary small" id="add-ing">+ ингредиент</button>
+    </div>
+    <!-- Способ 2: один ингредиент на строку -->
+    <div id="mode-text" style="display:none">
+      <textarea id="ing-text" placeholder="Один ингредиент на строку:&#10;свёкла&#10;капуста&#10;лук"></textarea>
+    </div>
+    <div class="buttons">
+      <button type="button" id="save-dish">Сохранить</button>
+      <button type="button" class="secondary" id="cancel-edit" style="display:none">Отмена</button>
+    </div>
+    <div id="form-error" class="muted" style="color:#b00020;margin-top:8px"></div>
+  </section>
+
+  <!-- Правая колонка: оценка блюд -->
+  <section>
+    <h2>Оценка блюд</h2>
+    <p class="muted" style="margin-top:0">Процент ингредиентов блюда, которые есть и в других блюдах.</p>
+    <div id="dish-list"></div>
+  </section>
+
+  <!-- Внизу: база ингредиентов -->
+  <section id="ingredients-section">
+    <h2>Ингредиенты</h2>
+    <div class="toolbar">
+      <label><input type="checkbox" id="only-singles"> Только «одиночки» (используются в одном блюде)</label>
+      <span class="muted" id="ing-count"></span>
+    </div>
+    <table>
+      <thead>
+        <tr>
+          <th class="sortable" data-sort="name">Ингредиент <span id="arrow-name"></span></th>
+          <th class="sortable" data-sort="count">Блюд <span id="arrow-count"></span></th>
+          <th>Где используется</th>
+        </tr>
+      </thead>
+      <tbody id="ing-table"></tbody>
+    </table>
+  </section>
+</main>
+
+<!-- Библиотека SheetJS для Excel лежит рядом с этим файлом -->
+<script src="xlsx.full.min.js"></script>
+
+<script>
+/* =====================================================
+   1. ДАННЫЕ И ХРАНЕНИЕ
+   Единственный источник данных — массив dishes.
+   База ингредиентов и проценты каждый раз считаются заново.
+   Блюдо: { id: "d1", name: "Борщ", ingredients: ["лук", "капуста"] }
+   ===================================================== */
+const STORAGE_KEY = "techcards_v1";
+let dishes = loadDishes();
+let editingId = null; // id блюда, которое сейчас редактируется (null — создаём новое)
+let inputMode = "form"; // способ ввода: "form" (форма) или "text" (вставка текстом)
+let sortBy = "count";   // сортировка таблицы ингредиентов: "name" или "count"
+let sortDir = 1;        // 1 — по возрастанию, -1 — по убыванию
+
+function loadDishes() {
+  try {
+    const data = JSON.parse(localStorage.getItem(STORAGE_KEY));
+    if (data && Array.isArray(data.dishes)) return data.dishes;
+  } catch (e) { /* пустое или битое хранилище — начинаем с нуля */ }
+  return [];
+}
+
+function saveDishes() {
+  try {
+    localStorage.setItem(STORAGE_KEY, JSON.stringify({ version: 1, dishes: dishes }));
+  } catch (e) { /* хранилище недоступно — приложение всё равно работает */ }
+}
+
+let idCounter = 0;
+function newId() {
+  idCounter++; // счётчик гарантирует разные id, даже если блюда создаются в одну миллисекунду
+  return "d" + Date.now() + "_" + idCounter;
+}
+
+/* =====================================================
+   2. НОРМАЛИЗАЦИЯ
+   Нижний регистр + убираем лишние пробелы.
+   ===================================================== */
+function normalize(s) {
+  return String(s).trim().toLowerCase().replace(/\s+/g, " ");
+}
+
+// Список ингредиентов: нормализуем, выбрасываем пустые и повторы внутри блюда
+function cleanIngredients(list) {
+  const result = [];
+  for (const item of list) {
+    const n = normalize(item);
+    if (n && !result.includes(n)) result.push(n);
+  }
+  return result;
+}
+
+/* =====================================================
+   3. РАСЧЁТ (без работы со страницей)
+   Возвращает:
+     usage  — Map: ингредиент -> список id блюд, где он есть
+     scores — Map: id блюда -> { total, shared, unique, percent }
+   percent = общих ингредиентов / всех ингредиентов блюда * 100
+   Блюдо без ингредиентов: percent = null (показываем «—»)
+   ===================================================== */
+function calculate(dishes) {
+  const usage = new Map();
+  for (const d of dishes) {
+    for (const ing of d.ingredients) {
+      if (!usage.has(ing)) usage.set(ing, []);
+      usage.get(ing).push(d.id);
+    }
+  }
+  const scores = new Map();
+  for (const d of dishes) {
+    // ингредиент «общий», если он есть хотя бы в одном ДРУГОМ блюде
+    const shared = d.ingredients.filter(ing => usage.get(ing).length >= 2);
+    const unique = d.ingredients.filter(ing => usage.get(ing).length === 1);
+    const total = d.ingredients.length;
+    scores.set(d.id, {
+      total: total,
+      shared: shared,
+      unique: unique,
+      percent: total === 0 ? null : (shared.length / total) * 100
+    });
+  }
+  return { usage, scores };
+}
+
+/* =====================================================
+   4. ОТРИСОВКА
+   ===================================================== */
+function render() {
+  const { usage, scores } = calculate(dishes);
+  renderDishes(scores);
+  renderIngredients(usage);
+}
+
+// Список блюд с процентами
+function renderDishes(scores) {
+  const box = document.getElementById("dish-list");
+  box.innerHTML = "";
+
+  if (dishes.length === 0) {
+    box.innerHTML = '<div class="empty">Добавьте первое блюдо в форме слева.<br><br>' +
+      '<button type="button" id="load-sample">Загрузить пример (4 блюда)</button></div>';
+    return;
+  }
+
+  for (const d of dishes) {
+    const s = scores.get(d.id);
+    const div = document.createElement("div");
+    div.className = "dish";
+
+    let percentText, note = "";
+    if (s.percent === null) {
+      percentText = "—";
+      note = "нет ингредиентов";
+    } else {
+      percentText = Math.round(s.percent) + "%";
+      if (dishes.length === 1) note = "в базе одно блюдо";
+    }
+
+    div.innerHTML =
+      '<div class="dish-head">' +
+        '<span class="dish-name">' + escapeHtml(d.name) + '</span>' +
+        '<span class="percent">' + percentText + '</span>' +
+      '</div>' +
+      '<div class="bar"><div style="width:' + (s.percent || 0) + '%"></div></div>' +
+      '<div class="muted">' + (note ? note + '. ' : '') +
+        'Ингредиентов: ' + s.total + '. ' +
+        'Уникальные: ' + (s.unique.length ? escapeHtml(s.unique.join(", ")) : "нет") +
+      '</div>' +
+      '<div class="buttons">' +
+        '<button type="button" class="small" data-edit="' + d.id + '">Изменить</button>' +
+        '<button type="button" class="small secondary" data-del="' + d.id + '">Удалить</button>' +
+      '</div>';
+    box.appendChild(div);
+  }
+}
+
+// Таблица ингредиентов: название, число блюд, в каких блюдах используется
+function renderIngredients(usage) {
+  const onlySingles = document.getElementById("only-singles").checked;
+  const nameById = new Map(dishes.map(d => [d.id, d.name]));
+
+  // превращаем Map в массив строк таблицы
+  let rows = [...usage].map(([name, ids]) => ({ name: name, count: ids.length, ids: ids }));
+  const total = rows.length;
+  if (onlySingles) rows = rows.filter(r => r.count === 1);
+
+  // сортировка: по выбранному столбцу, при равенстве — по названию
+  rows.sort((a, b) => {
+    const byName = a.name.localeCompare(b.name, "ru");
+    if (sortBy === "name") return byName * sortDir;
+    return (a.count - b.count) * sortDir || byName;
+  });
+
+  const body = document.getElementById("ing-table");
+  body.innerHTML = "";
+  for (const r of rows) {
+    const tr = document.createElement("tr");
+    tr.innerHTML = "<td>" + escapeHtml(r.name) + "</td><td>" + r.count + "</td><td>" +
+      escapeHtml(r.ids.map(id => nameById.get(id)).join(", ")) + "</td>";
+    body.appendChild(tr);
+  }
+  if (rows.length === 0) {
+    body.innerHTML = '<tr><td colspan="3" class="muted">' +
+      (total === 0 ? "Ингредиентов пока нет." : "Одиночек нет.") + "</td></tr>";
+  }
+
+  const singles = [...usage.values()].filter(ids => ids.length === 1).length;
+  document.getElementById("ing-count").textContent = "Всего: " + total + ", одиночек: " + singles;
+  document.getElementById("arrow-name").textContent = sortBy === "name" ? (sortDir === 1 ? "▲" : "▼") : "";
+  document.getElementById("arrow-count").textContent = sortBy === "count" ? (sortDir === 1 ? "▲" : "▼") : "";
+}
+
+// Защита от случайных символов < > & в названиях
+function escapeHtml(s) {
+  return String(s).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
+}
+
+/* =====================================================
+   5. ФОРМА И ОБРАБОТЧИКИ
+   ===================================================== */
+const nameInput = document.getElementById("dish-name");
+const ingList = document.getElementById("ing-list");
+const errorBox = document.getElementById("form-error");
+
+// Добавить пустое поле ингредиента (с готовым значением, если оно передано)
+function addIngRow(value) {
+  const row = document.createElement("div");
+  row.className = "ing-row";
+  row.innerHTML = '<input type="text" placeholder="Ингредиент">' +
+                  '<button type="button" class="secondary small">×</button>';
+  row.querySelector("input").value = value || "";
+  row.querySelector("button").onclick = () => row.remove();
+  ingList.appendChild(row);
+  return row;
+}
+
+const textInput = document.getElementById("ing-text");
+
+// Переключить способ ввода, перенеся уже введённые ингредиенты в другой способ
+function setMode(mode) {
+  const current = readIngredientsRaw(); // читаем из того способа, что был активен
+  inputMode = mode;
+  fillIngredients(current);
+  document.getElementById("mode-form").style.display = mode === "form" ? "" : "none";
+  document.getElementById("mode-text").style.display = mode === "text" ? "" : "none";
+  document.getElementById("tab-form").classList.toggle("active", mode === "form");
+  document.getElementById("tab-text").classList.toggle("active", mode === "text");
+}
+
+// Прочитать ингредиенты (как введены) из активного способа ввода
+function readIngredientsRaw() {
+  if (inputMode === "text") return textInput.value.split(/\r?\n/);
+  return [...ingList.querySelectorAll("input")].map(i => i.value);
+}
+
+// Записать список ингредиентов в оба способа ввода
+function fillIngredients(list) {
+  ingList.innerHTML = "";
+  list.filter(x => x.trim()).forEach(ing => addIngRow(ing));
+  addIngRow();
+  textInput.value = list.filter(x => x.trim()).join("\n");
+}
+
+// Загрузить пример: 4 блюда из проверочного набора
+function loadSample() {
+  const sample = [
+    ["Борщ", "свёкла, капуста, картофель, лук, говядина"],
+    ["Щи", "капуста, картофель, лук, сметана"],
+    ["Пюре", "картофель, молоко, масло сливочное"],
+    ["Оливье", "картофель, морковь, яйцо, майонез"]
+  ];
+  for (const [name, ings] of sample) {
+    dishes.push({ id: newId(), name: name, ingredients: cleanIngredients(ings.split(",")) });
+  }
+  saveDishes();
+  render();
+}
+
+// Сбросить форму в состояние «новое блюдо»
+function resetForm() {
+  editingId = null;
+  nameInput.value = "";
+  fillIngredients([]);
+  errorBox.textContent = "";
+  document.getElementById("form-title").textContent = "Новое блюдо";
+  document.getElementById("cancel-edit").style.display = "none";
+}
+
+// Загрузить блюдо в форму для редактирования
+function startEdit(id) {
+  const d = dishes.find(x => x.id === id);
+  if (!d) return;
+  editingId = id;
+  nameInput.value = d.name;
+  fillIngredients(d.ingredients);
+  errorBox.textContent = "";
+  document.getElementById("form-title").textContent = "Редактирование: " + d.name;
+  document.getElementById("cancel-edit").style.display = "";
+  nameInput.focus();
+}
+
+function saveDish() {
+  const name = nameInput.value.trim().replace(/\s+/g, " ");
+  if (!name) { errorBox.textContent = "Введите название блюда."; return; }
+
+  // Блюда с одинаковым названием не допускаем
+  const clash = dishes.find(d => normalize(d.name) === normalize(name) && d.id !== editingId);
+  if (clash) { errorBox.textContent = "Блюдо с таким названием уже есть."; return; }
+
+  const ingredients = cleanIngredients(readIngredientsRaw());
+
+  if (editingId) {
+    const d = dishes.find(x => x.id === editingId);
+    d.name = name;
+    d.ingredients = ingredients;
+  } else {
+    dishes.push({ id: newId(), name: name, ingredients: ingredients });
+  }
+  saveDishes();
+  resetForm();
+  render();
+}
+
+function deleteDish(id) {
+  const d = dishes.find(x => x.id === id);
+  if (!d || !confirm('Удалить блюдо «' + d.name + '»?')) return;
+  dishes = dishes.filter(x => x.id !== id);
+  if (editingId === id) resetForm();
+  saveDishes();
+  render();
+}
+
+document.getElementById("add-ing").onclick = () => addIngRow().querySelector("input").focus();
+document.getElementById("save-dish").onclick = saveDish;
+document.getElementById("cancel-edit").onclick = resetForm;
+
+// Enter в поле ингредиента добавляет следующую строку
+ingList.addEventListener("keydown", e => {
+  if (e.key === "Enter") { e.preventDefault(); addIngRow().querySelector("input").focus(); }
+});
+
+// Кнопки «Изменить» / «Удалить» / «Загрузить пример» в списке блюд
+document.getElementById("dish-list").addEventListener("click", e => {
+  if (e.target.dataset.edit) startEdit(e.target.dataset.edit);
+  if (e.target.dataset.del) deleteDish(e.target.dataset.del);
+  if (e.target.id === "load-sample") loadSample();
+});
+
+// Вкладки способа ввода
+document.getElementById("tab-form").onclick = () => setMode("form");
+document.getElementById("tab-text").onclick = () => setMode("text");
+
+// Таблица ингредиентов: клик по заголовку — сортировка, повторный клик — смена направления
+document.querySelectorAll("th.sortable").forEach(th => {
+  th.onclick = () => {
+    const col = th.dataset.sort;
+    if (sortBy === col) sortDir = -sortDir;
+    else { sortBy = col; sortDir = 1; }
+    render();
+  };
+});
+document.getElementById("only-singles").onchange = render;
+
+/* =====================================================
+   6. ИМПОРТ И ЭКСПОРТ JSON (резервная копия)
+   Формат файла тот же, что в localStorage: { version: 1, dishes: [...] }
+   ===================================================== */
+
+// Окно «Заменить всё / Объединить / Отмена». Возвращает "replace", "merge" или null (отмена).
+function askImportMode(count) {
+  return new Promise(resolve => {
+    const modal = document.getElementById("modal");
+    document.getElementById("modal-text").textContent =
+      "В файле блюд: " + count + ". В базе уже есть блюда (" + dishes.length + "). " +
+      "Заменить всю базу или объединить? При объединении блюдо с тем же названием будет заменено.";
+    modal.style.display = "";
+    const done = answer => { modal.style.display = "none"; resolve(answer); };
+    document.getElementById("modal-replace").onclick = () => done("replace");
+    document.getElementById("modal-merge").onclick = () => done("merge");
+    document.getElementById("modal-cancel").onclick = () => done(null);
+  });
+}
+
+// Привести список блюд из файла к нашему виду. Пустые названия пропускаем,
+// блюда с одинаковым названием внутри файла сливаем в одно (последнее побеждает).
+function cleanImportedDishes(list) {
+  const byName = new Map();
+  for (const item of list) {
+    if (!item || typeof item.name !== "string") continue;
+    const name = item.name.trim().replace(/\s+/g, " ");
+    if (!name) continue;
+    const ings = Array.isArray(item.ingredients) ? item.ingredients : [];
+    byName.set(normalize(name), { id: newId(), name: name, ingredients: cleanIngredients(ings) });
+  }
+  return [...byName.values()];
+}
+
+// Общая функция для всех видов импорта (JSON, позже Excel): спрашивает режим и применяет
+async function applyImport(imported) {
+  if (imported.length === 0) { alert("В файле не найдено ни одного блюда."); return; }
+  let mode = "replace";
+  if (dishes.length > 0) {
+    mode = await askImportMode(imported.length);
+    if (!mode) return;
+  }
+  if (mode === "replace") {
+    dishes = imported;
+  } else {
+    for (const nd of imported) {
+      const i = dishes.findIndex(d => normalize(d.name) === normalize(nd.name));
+      if (i >= 0) dishes[i] = nd; else dishes.push(nd);
+    }
+  }
+  saveDishes();
+  resetForm();
+  render();
+}
+
+function exportJson() {
+  const text = JSON.stringify({ version: 1, dishes: dishes }, null, 2);
+  const blob = new Blob([text], { type: "application/json" });
+  const a = document.createElement("a");
+  a.href = URL.createObjectURL(blob);
+  a.download = "techcards-" + new Date().toISOString().slice(0, 10) + ".json";
+  a.click();
+  URL.revokeObjectURL(a.href);
+}
+
+function importJsonFile(file) {
+  const reader = new FileReader();
+  reader.onload = () => {
+    let data;
+    try { data = JSON.parse(reader.result); }
+    catch (e) { alert("Не удалось прочитать файл: это не JSON."); return; }
+    if (!data || !Array.isArray(data.dishes)) {
+      alert("Неверный формат файла: нет списка блюд (dishes). Данные не изменены.");
+      return;
+    }
+    applyImport(cleanImportedDishes(data.dishes));
+  };
+  reader.readAsText(file);
+}
+
+document.getElementById("export-json").onclick = exportJson;
+document.getElementById("import-json").onclick = () => document.getElementById("json-file").click();
+document.getElementById("json-file").onchange = e => {
+  if (e.target.files[0]) importJsonFile(e.target.files[0]);
+  e.target.value = ""; // позволяет выбрать тот же файл повторно
+};
+
+/* =====================================================
+   7. ИМПОРТ И ЭКСПОРТ EXCEL (.xlsx), библиотека SheetJS (XLSX)
+   Лист «Блюда»: заголовки «Блюдо» | «Ингредиент», одна пара на строку.
+   Этот же формат читает импорт — файл можно выгрузить, поправить и загрузить обратно.
+   ===================================================== */
+
+function xlsxAvailable() {
+  if (typeof XLSX === "undefined") {
+    alert("Библиотека Excel не загрузилась. Проверьте, что файл xlsx.full.min.js лежит рядом с index.html.");
+    return false;
+  }
+  return true;
+}
+
+function exportXlsx() {
+  if (!xlsxAvailable()) return;
+  const { usage, scores } = calculate(dishes);
+
+  // Лист «Блюда»: пары блюдо — ингредиент (блюдо без ингредиентов — строка с пустой ячейкой)
+  const pairs = [["Блюдо", "Ингредиент"]];
+  for (const d of dishes) {
+    if (d.ingredients.length === 0) pairs.push([d.name, ""]);
+    for (const ing of d.ingredients) pairs.push([d.name, ing]);
+  }
+
+  // Лист «Оценка»: блюдо, процент, уникальные ингредиенты
+  const rating = [["Блюдо", "Процент", "Уникальные ингредиенты"]];
+  for (const d of dishes) {
+    const s = scores.get(d.id);
+    rating.push([d.name, s.percent === null ? "—" : Math.round(s.percent), s.unique.join(", ")]);
+  }
+
+  // Лист «Ингредиенты»: ингредиент, число блюд
+  const ingredients = [["Ингредиент", "Число блюд"]];
+  for (const [name, ids] of usage) ingredients.push([name, ids.length]);
+
+  const wb = XLSX.utils.book_new();
+  const addSheet = (rows, title, widths) => {
+    const ws = XLSX.utils.aoa_to_sheet(rows);
+    ws["!cols"] = widths.map(w => ({ wch: w })); // ширина столбцов
+    XLSX.utils.book_append_sheet(wb, ws, title);
+  };
+  addSheet(pairs, "Блюда", [28, 28]);
+  addSheet(rating, "Оценка", [28, 10, 50]);
+  addSheet(ingredients, "Ингредиенты", [28, 12]);
+  XLSX.writeFile(wb, "techcards-" + new Date().toISOString().slice(0, 10) + ".xlsx");
+}
+
+function importXlsxFile(file) {
+  if (!xlsxAvailable()) return;
+  const reader = new FileReader();
+  reader.onload = () => {
+    let rows;
+    try {
+      const wb = XLSX.read(reader.result, { type: "array" });
+      // берём лист «Блюда», а если его нет — первый лист
+      const ws = wb.Sheets["Блюда"] || wb.Sheets[wb.SheetNames[0]];
+      rows = XLSX.utils.sheet_to_json(ws, { header: 1, defval: "" });
+    } catch (e) {
+      alert("Не удалось прочитать файл Excel.");
+      return;
+    }
+
+    // Пропускаем строку заголовков, если она есть
+    if (rows.length > 0 && normalize(rows[0][0]) === "блюдо") rows.shift();
+
+    // Собираем строки «блюдо | ингредиент» в блюда с общим списком ингредиентов
+    const byName = new Map();
+    for (const row of rows) {
+      const name = String(row[0]).trim();
+      if (!name) continue; // пустая строка или нет названия блюда
+      const key = normalize(name);
+      if (!byName.has(key)) byName.set(key, { name: name, ingredients: [] });
+      byName.get(key).ingredients.push(String(row[1]));
+    }
+    applyImport(cleanImportedDishes([...byName.values()]));
+  };
+  reader.readAsArrayBuffer(file);
+}
+
+document.getElementById("export-xlsx").onclick = exportXlsx;
+document.getElementById("import-xlsx").onclick = () => document.getElementById("xlsx-file").click();
+document.getElementById("xlsx-file").onchange = e => {
+  if (e.target.files[0]) importXlsxFile(e.target.files[0]);
+  e.target.value = "";
+};
+
+/* ===== Запуск ===== */
+resetForm();
+render();
+</script>
+</body>
+</html>
